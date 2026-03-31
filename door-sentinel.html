@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Door Sentinel</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&display=swap');
+
+  :root {
+    --bg: #0a0a0a;
+    --panel: #111;
+    --border: #1f1f1f;
+    --accent: #00ff88;
+    --accent2: #ff3c3c;
+    --accent3: #ffcc00;
+    --text: #e0e0e0;
+    --muted: #555;
+    --font-mono: 'Share Tech Mono', monospace;
+    --font-display: 'Bebas Neue', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+    gap: 14px;
+    overflow-x: hidden;
+  }
+
+  /* scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 3px,
+      rgba(0,0,0,0.08) 3px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  header {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+
+  header h1 {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,255,136,0.4);
+  }
+
+  header span {
+    font-size: 0.65rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .camera-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 480px;
+    aspect-ratio: 4/3;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    background: #000;
+  }
+
+  .camera-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 2px solid transparent;
+    pointer-events: none;
+    transition: border-color 0.1s;
+    z-index: 10;
+  }
+
+  .camera-wrap.alert::after {
+    border-color: var(--accent2);
+    box-shadow: inset 0 0 30px rgba(255,60,60,0.3);
+    animation: flash 0.3s ease;
+  }
+
+  @keyframes flash {
+    0%   { border-color: var(--accent2); }
+    50%  { border-color: #fff; }
+    100% { border-color: var(--accent2); }
+  }
+
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transform: scaleX(-1);
+  }
+
+  canvas { display: none; }
+
+  .diff-overlay {
+    position: absolute;
+    inset: 0;
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .corner {
+    position: absolute;
+    width: 14px; height: 14px;
+    border-color: var(--accent);
+    border-style: solid;
+    opacity: 0.7;
+    z-index: 11;
+  }
+  .corner.tl { top: 8px; left: 8px; border-width: 2px 0 0 2px; }
+  .corner.tr { top: 8px; right: 8px; border-width: 2px 2px 0 0; }
+  .corner.bl { bottom: 8px; left: 8px; border-width: 0 0 2px 2px; }
+  .corner.br { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
+
+  .hud {
+    position: absolute;
+    bottom: 8px; left: 10px;
+    font-size: 0.6rem;
+    color: var(--accent);
+    opacity: 0.7;
+    z-index: 11;
+    letter-spacing: 1px;
+  }
+
+  /* Motion bar */
+  .meter-wrap {
+    width: 100%;
+    max-width: 480px;
+  }
+
+  .meter-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.62rem;
+    color: var(--muted);
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+  }
+
+  .meter-label span:last-child { color: var(--text); }
+
+  .meter-bg {
+    height: 6px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .meter-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.1s, background 0.1s;
+  }
+
+  .meter-threshold {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent3);
+    opacity: 0.8;
+  }
+
+  /* Controls */
+  .controls {
+    width: 100%;
+    max-width: 480px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 12px;
+  }
+
+  .panel-label {
+    font-size: 0.58rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  input[type=range] {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 4px;
+    background: var(--border);
+    outline: none;
+    border-radius: 0;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border-radius: 0;
+    cursor: pointer;
+  }
+
+  .range-val {
+    font-size: 0.9rem;
+    color: var(--accent);
+    margin-top: 4px;
+    display: block;
+  }
+
+  /* Big button */
+  .btn-wrap {
+    width: 100%;
+    max-width: 480px;
+  }
+
+  button#toggleBtn {
+    width: 100%;
+    padding: 16px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    letter-spacing: 4px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button#toggleBtn:active {
+    background: var(--accent);
+    color: #000;
+  }
+
+  button#toggleBtn.active {
+    background: var(--accent);
+    color: #000;
+    box-shadow: 0 0 30px rgba(0,255,136,0.25);
+  }
+
+  button#toggleBtn.active:active {
+    background: transparent;
+    color: var(--accent);
+  }
+
+  /* Log */
+  .log-wrap {
+    width: 100%;
+    max-width: 480px;
+  }
+
+  .log-header {
+    font-size: 0.58rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .log-header button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }
+
+  #log {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    height: 110px;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 0.65rem;
+    line-height: 1.6;
+  }
+
+  .log-entry { color: var(--muted); }
+  .log-entry.alert { color: var(--accent2); }
+  .log-entry.ok { color: var(--accent); }
+  .log-entry.info { color: var(--accent3); }
+
+  /* Status dot */
+  .status-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    margin-right: 6px;
+    vertical-align: middle;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+
+  .status-dot.live {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .cooldown-info {
+    font-size: 0.6rem;
+    color: var(--muted);
+    text-align: center;
+    margin-top: -4px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DOOR SENTINEL</h1>
+  <span>v1.0 // motion → telegram</span>
+</header>
+
+<div class="camera-wrap" id="cameraWrap">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <canvas id="diffCanvas" class="diff-overlay"></canvas>
+  <div class="hud" id="hud">STANDBY</div>
+</div>
+
+<div class="meter-wrap">
+  <div class="meter-label">
+    <span>MOTION LEVEL</span>
+    <span id="motionPct">0%</span>
+  </div>
+  <div class="meter-bg">
+    <div class="meter-fill" id="meterFill"></div>
+    <div class="meter-threshold" id="thresholdLine"></div>
+  </div>
+</div>
+
+<div class="controls">
+  <div class="panel">
+    <div class="panel-label">Sensitivity</div>
+    <input type="range" id="sensitivitySlider" min="1" max="50" value="15">
+    <span class="range-val" id="sensitivityVal">15%</span>
+  </div>
+  <div class="panel">
+    <div class="panel-label">Cooldown (s)</div>
+    <input type="range" id="cooldownSlider" min="3" max="60" value="10">
+    <span class="range-val" id="cooldownVal">10s</span>
+  </div>
+</div>
+
+<div class="btn-wrap">
+  <button id="toggleBtn" onclick="toggleWatch()">▶ START WATCHING</button>
+</div>
+
+<div class="log-wrap">
+  <div class="log-header">
+    <span><span class="status-dot" id="statusDot"></span>EVENT LOG</span>
+    <button onclick="clearLog()">CLEAR</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<script>
+const BOT_TOKEN = '8373948933:AAFvPdNTiZEP3bnUPr2kPxW1R0CaQzb1FGc';
+const CHAT_ID   = '2143380427';
+
+const video       = document.getElementById('video');
+const canvas      = document.getElementById('canvas');
+const diffCanvas  = document.getElementById('diffCanvas');
+const ctx         = canvas.getContext('2d');
+const diffCtx     = diffCanvas.getContext('2d');
+const hud         = document.getElementById('hud');
+const meterFill   = document.getElementById('meterFill');
+const motionPct   = document.getElementById('motionPct');
+const threshLine  = document.getElementById('thresholdLine');
+const statusDot   = document.getElementById('statusDot');
+const cameraWrap  = document.getElementById('cameraWrap');
+const toggleBtn   = document.getElementById('toggleBtn');
+const logEl       = document.getElementById('log');
+
+const sensitivitySlider = document.getElementById('sensitivitySlider');
+const cooldownSlider    = document.getElementById('cooldownSlider');
+const sensitivityVal    = document.getElementById('sensitivityVal');
+const cooldownVal       = document.getElementById('cooldownVal');
+
+let watching     = false;
+let stream       = null;
+let animFrame    = null;
+let prevData     = null;
+let lastAlertAt  = 0;
+let alertCount   = 0;
+
+const W = 160, H = 120; // small res for speed
+
+canvas.width     = W; canvas.height     = H;
+diffCanvas.width = W; diffCanvas.height = H;
+
+sensitivitySlider.addEventListener('input', () => {
+  sensitivityVal.textContent = sensitivitySlider.value + '%';
+  updateThresholdLine();
+});
+
+cooldownSlider.addEventListener('input', () => {
+  cooldownVal.textContent = cooldownSlider.value + 's';
+});
+
+function updateThresholdLine() {
+  threshLine.style.left = sensitivitySlider.value + '%';
+}
+updateThresholdLine();
+
+function addLog(msg, type = '') {
+  const now = new Date();
+  const ts  = now.toTimeString().slice(0,8);
+  const el  = document.createElement('div');
+  el.className = 'log-entry ' + type;
+  el.textContent = `[${ts}] ${msg}`;
+  logEl.appendChild(el);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function clearLog() { logEl.innerHTML = ''; }
+
+async function sendTelegram(text) {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: CHAT_ID, text })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      addLog('Telegram alert sent ✓', 'ok');
+    } else {
+      addLog('Telegram error: ' + data.description, 'alert');
+    }
+  } catch (e) {
+    addLog('Network error: ' + e.message, 'alert');
+  }
+}
+
+function detectMotion() {
+  if (!watching) return;
+
+  ctx.drawImage(video, 0, 0, W, H);
+  const frame = ctx.getImageData(0, 0, W, H);
+
+  if (!prevData) {
+    prevData = frame.data;
+    animFrame = requestAnimationFrame(detectMotion);
+    return;
+  }
+
+  const diff    = diffCtx.createImageData(W, H);
+  let   changed = 0;
+  const pixelThreshold = 35; // per-channel diff to count as changed
+
+  for (let i = 0; i < frame.data.length; i += 4) {
+    const dr = Math.abs(frame.data[i]   - prevData[i]);
+    const dg = Math.abs(frame.data[i+1] - prevData[i+1]);
+    const db = Math.abs(frame.data[i+2] - prevData[i+2]);
+    const motion = (dr + dg + db) / 3 > pixelThreshold;
+    if (motion) {
+      changed++;
+      diff.data[i]   = 0;
+      diff.data[i+1] = 255;
+      diff.data[i+2] = 100;
+      diff.data[i+3] = 200;
+    } else {
+      diff.data[i+3] = 0;
+    }
+  }
+
+  diffCtx.putImageData(diff, 0, 0);
+  prevData = frame.data;
+
+  const totalPixels = W * H;
+  const pct = (changed / totalPixels) * 100;
+  const threshold = parseFloat(sensitivitySlider.value);
+  const cooldown  = parseFloat(cooldownSlider.value) * 1000;
+  const now = Date.now();
+
+  // Update meter
+  const displayPct = Math.min(pct, 100);
+  meterFill.style.width = displayPct + '%';
+  meterFill.style.background = pct >= threshold ? 'var(--accent2)' : 'var(--accent)';
+  motionPct.textContent = pct.toFixed(1) + '%';
+
+  // Alert
+  if (pct >= threshold && (now - lastAlertAt) > cooldown) {
+    lastAlertAt = now;
+    alertCount++;
+    cameraWrap.classList.add('alert');
+    setTimeout(() => cameraWrap.classList.remove('alert'), 600);
+    hud.textContent = '⚠ MOTION DETECTED';
+    addLog(`Motion! ${pct.toFixed(1)}% changed — alert #${alertCount}`, 'alert');
+    const time = new Date().toLocaleTimeString();
+    sendTelegram(`🚨 Door motion detected!\nTime: ${time}\nLevel: ${pct.toFixed(1)}%\nAlert #${alertCount}`);
+  } else if (pct < threshold * 0.3) {
+    hud.textContent = 'WATCHING...';
+  }
+
+  animFrame = requestAnimationFrame(detectMotion);
+}
+
+async function toggleWatch() {
+  if (!watching) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      watching = true;
+      prevData = null;
+      toggleBtn.textContent = '⏹ STOP WATCHING';
+      toggleBtn.classList.add('active');
+      statusDot.classList.add('live');
+      hud.textContent = 'WATCHING...';
+      addLog('Surveillance started', 'info');
+      addLog(`Sensitivity: ${sensitivitySlider.value}% | Cooldown: ${cooldownSlider.value}s`, 'info');
+
+      // small delay for video to stabilize
+      setTimeout(() => {
+        animFrame = requestAnimationFrame(detectMotion);
+      }, 800);
+
+    } catch (e) {
+      addLog('Camera error: ' + e.message, 'alert');
+      alert('Camera access denied or unavailable.\nPlease allow camera access in Safari settings.');
+    }
+  } else {
+    watching = false;
+    if (animFrame) cancelAnimationFrame(animFrame);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; prevData = null;
+
+    toggleBtn.textContent = '▶ START WATCHING';
+    toggleBtn.classList.remove('active');
+    statusDot.classList.remove('live');
+    hud.textContent = 'STANDBY';
+    meterFill.style.width = '0%';
+    motionPct.textContent = '0%';
+    diffCtx.clearRect(0, 0, W, H);
+    addLog('Surveillance stopped', 'info');
+  }
+}
+</script>
+</body>
+</html>
